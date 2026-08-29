@@ -1,0 +1,55 @@
+{
+  "project": {
+    "name": "Restaurant marketing website",
+    "objective": "A marketing website for a restaurant to attract new customers",
+    "budget": 80000,
+    "currency": "INR",
+    "estimated_hours": 20,
+    "deliverables": ["Home page", "About page", "Menu page", "Contact page", "Gallery page"],
+    "exclusions": ["online ordering", "user accounts", "payment processing", "staff or admin tools"]
+  },
+  "sequences": [
+    {
+      "id": "A_minor_tweaks",
+      "description": "Only small content/style tweaks - should stay LOW drift.",
+      "requests": [
+        "Change the header font to something bolder.",
+        "Add three more dishes to the menu page.",
+        "Swap the hero image for a new photo."
+      ],
+      "expected_final_drift_level": "LOW"
+    },
+    {
+      "id": "B_moderate_expansion",
+      "description": "A couple of real out-of-scope asks mixed with small tweaks - should land around MODERATE.",
+      "requests": [
+        "Add three more dishes to the menu page.",
+        "Add a downloadable PDF version of the menu.",
+        "We'd like a table reservation system with real-time availability."
+      ],
+      "expected_final_drift_level": "MODERATE"
+    },
+    {
+      "id": "C_operations_platform",
+      "description": "The full 'marketing site quietly becomes an operations platform' story - should reach CRITICAL.",
+      "requests": [
+        "Can customers create an account and log in?",
+        "We want a loyalty points system for repeat customers.",
+        "Add a staff dashboard where our team can update the menu.",
+        "Build an admin panel to manage orders and inventory.",
+        "Can you build an online ordering system for takeout?"
+      ],
+      "expected_final_drift_level": "CRITICAL"
+    },
+    {
+      "id": "D_mixed_with_ambiguity",
+      "description": "A mix of vague asks and one real out-of-scope request - should stay LOW to MODERATE, not spike just because of vagueness.",
+      "requests": [
+        "Can you make the site feel more premium?",
+        "Make the site faster and more modern.",
+        "We'd like customers to be able to book a table online with real-time availability."
+      ],
+      "expected_final_drift_level": "MODERATE"
+    }
+  ]
+}
