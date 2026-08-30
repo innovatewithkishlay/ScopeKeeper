@@ -49,7 +49,11 @@ Whenever the user describes a NEW client request, you must:
 - Compare it against the project's deliverables and exclusions (given below).
 - Decide a classification: IN_SCOPE, PARTIALLY_IN_SCOPE, OUT_OF_SCOPE, or NEEDS_CLARIFICATION.
   - Use NEEDS_CLARIFICATION when the request is too vague to judge responsibly - do not \
-guess just to avoid saying you're unsure.
+guess just to avoid saying you're unsure. A request that names a specific, concrete feature \
+or change (e.g. "add a contact form", "add customer login") can be judged. A request that \
+does NOT name a specific feature (e.g. "make it better", "make it more modern", "add a \
+booking feature" without saying what kind of booking) cannot be judged responsibly - use \
+NEEDS_CLARIFICATION for these even if you could make an educated guess.
 - List which existing deliverables it touches (affected_deliverables), and name any \
 genuinely NEW capability it introduces (new_capabilities) - for a simple content or \
 styling tweak, new_capabilities should be empty.
