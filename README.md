@@ -78,6 +78,10 @@ full diagram.
   above) - a project getting many vague requests wouldn't show elevated drift from that alone.
 - Duplicate-request detection is exact-match only; a reworded repeat of the same ask is treated as new.
 - State lives in memory for the length of one notebook run - it isn't saved to disk between sessions.
+- Classification accuracy varies by a few points run to run (see "Measured accuracy" above) because
+  the model isn't fully deterministic - a single evaluation run shouldn't be read as a precise number.
+- The IN_SCOPE / PARTIALLY_IN_SCOPE boundary for "add a small widget to an existing page" requests is
+  inconsistent across runs - this is the single biggest open accuracy issue.
 
 ## Rubric self-check
 
@@ -90,6 +94,11 @@ full diagram.
 | README names tools, explains memory, one honest failure | This file | Sections above |
 | Tests | `tests/` | 3 no-API-key test files (all pass, see below) + `evaluation.py` for measured accuracy |
 
+One design decision, tuned using the measured results above: the system prompt explicitly tells the
+model to use `NEEDS_CLARIFICATION` for any request that doesn't name a specific feature, added after
+run 2 showed it answering confidently on vague requests instead. See "Measured accuracy" for the
+honest before/after result, including a side effect that wasn't fully resolved.
+
 Unit tests (no API key required) as of the last local run:
 
 ```
@@ -101,6 +110,34 @@ $ python tests/test_tools.py
 All tool tests passed.
 ```
 
-Classification/drift-sequence accuracy: **not measured in this repository** - `tests/evaluation.py`
-and notebook Section 12 will compute real numbers the moment a valid API key is supplied and the cell
-is run. No accuracy number is claimed here that wasn't actually produced by running the code.
+## Measured accuracy
+
+Run against the real Groq API on 2026-08-30, using `tests/evaluation.py`. Reported as three separate
+runs, not the best-looking one, because the model isn't perfectly deterministic even at
+`temperature=0.2`.
+
+**Cumulative drift-sequence accuracy: 100% (4/4)**, unchanged across every run - all four hand-labelled
+sequences (`data/drift_sequences.json`) landed on the expected drift level (LOW, MODERATE, MODERATE,
+CRITICAL). This is the core claim of the project, and it held up exactly as designed every time.
+
+**Single-request classification accuracy (`data/evaluation_cases.json`, 32 cases):**
+
+| Run | Accuracy | Notes |
+|---|---:|---|
+| 1 (original prompt) | 90.6% (29/32) | 5 categories all reasonable; NEEDS_CLARIFICATION recall 0.71 |
+| 2 (original prompt) | 84.4% (27/32) | 2 vague requests ("better for mobile", "a booking feature") answered confidently instead of flagged NEEDS_CLARIFICATION |
+| 3 (after prompt change below) | 84.4% (27/32) | NEEDS_CLARIFICATION recall improved to 0.86, but PARTIALLY_IN_SCOPE recall dropped to 0.33 |
+
+Run 2 showed a real pattern worth fixing: the model answered confidently on vague requests instead of
+admitting it needed more detail. The system prompt in `src/agent.py` was changed to explicitly instruct
+the model to use `NEEDS_CLARIFICATION` for any request that doesn't name a specific, concrete feature,
+even if it could make an educated guess.
+
+**Honest result of that change:** it measurably helped the thing it targeted (NEEDS_CLARIFICATION
+recall went up, and the "better for mobile" case that failed in run 2 was correctly flagged in run 3).
+But a different pattern appeared in the same run: four `PARTIALLY_IN_SCOPE` cases (all "add a small
+widget to an existing page" style requests, like a Google Maps embed or an FAQ section) got called
+`IN_SCOPE` instead. **With only one run before and one after, this isn't enough data to say for
+certain the prompt change caused the regression rather than normal run-to-run variance** - that would
+need several more runs averaged together, which is listed under Future Improvements rather than
+claimed here as a solved problem.
