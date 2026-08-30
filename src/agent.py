@@ -54,6 +54,17 @@ or change (e.g. "add a contact form", "add customer login") can be judged. A req
 does NOT name a specific feature (e.g. "make it better", "make it more modern", "add a \
 booking feature" without saying what kind of booking) cannot be judged responsibly - use \
 NEEDS_CLARIFICATION for these even if you could make an educated guess.
+  - The IN_SCOPE vs PARTIALLY_IN_SCOPE line: a request that only changes CONTENT or STYLE on an \
+already-included page (more list items, different text, a different photo, a different color or \
+font, more revisions of something already built) is IN_SCOPE. A request that adds a new piece of \
+INTERACTIVE FUNCTIONALITY to an already-included page (a filter/search box, a downloadable file, \
+an embedded third-party widget like a map, a form with logic beyond "send me a message") is \
+PARTIALLY_IN_SCOPE, even though it lives on a page that's already in scope - the page is included, \
+but this specific behaviour was not.
+  - Worked examples: "add three more dishes to the menu page" -> IN_SCOPE (more content, same \
+structure). "add a search box to filter the menu" -> PARTIALLY_IN_SCOPE (new interactive feature \
+on an included page). "add a downloadable PDF of the menu" -> PARTIALLY_IN_SCOPE (a new artifact, \
+not just edited content). "change the button color" -> IN_SCOPE (pure style).
 - List which existing deliverables it touches (affected_deliverables), and name any \
 genuinely NEW capability it introduces (new_capabilities) - for a simple content or \
 styling tweak, new_capabilities should be empty.
@@ -88,7 +99,7 @@ class ScopeKeeperAgent:
             "GITHUB_MODELS_ENDPOINT", "https://models.github.ai/inference"
         )
         self.model = model or os.getenv("MODEL", "openai/gpt-oss-120b")
-        self.fallback_model = fallback_model or os.getenv("FALLBACK_MODEL", "llama-3.1-8b-instant")
+        self.fallback_model = fallback_model or os.getenv("FALLBACK_MODEL", "openai/gpt-oss-20b")
         self.client = OpenAI(base_url=endpoint, api_key=token)
 
         self.state = ProjectState()
@@ -178,8 +189,12 @@ class ScopeKeeperAgent:
     def _complete_with_retry(self, messages: List[Dict[str, Any]]):
         try:
             return self._complete(messages, self.model)
-        except Exception:
-            time.sleep(1.5)
+        except Exception as first_error:
+            # A rate limit needs a real pause, not a quick retry that just hits the
+            # same limit again - a fixed short sleep would look like it's "handling"
+            # the error while actually wasting the one retry we get.
+            wait_seconds = 8 if "429" in str(first_error) or "rate" in str(first_error).lower() else 1.5
+            time.sleep(wait_seconds)
             try:
                 return self._complete(messages, self.model)
             except Exception:
