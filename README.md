@@ -80,8 +80,13 @@ full diagram.
 - State lives in memory for the length of one notebook run - it isn't saved to disk between sessions.
 - Classification accuracy varies by a few points run to run (see "Measured accuracy" above) because
   the model isn't fully deterministic - a single evaluation run shouldn't be read as a precise number.
-- The IN_SCOPE / PARTIALLY_IN_SCOPE boundary for "add a small widget to an existing page" requests is
-  inconsistent across runs - this is the single biggest open accuracy issue.
+- The drift score's hours component can shift a borderline sequence into the next drift level purely
+  because the model's own hours estimate for one request varied between runs (see "Measured accuracy").
+- Groq's available model list changes over time - the fallback model name is read from `.env` rather
+  than hardcoded for exactly this reason, but it should still be spot-checked occasionally
+  (`client.models.list()`) rather than assumed to still exist.
+- Running the evaluation script repeatedly in a short window can hit the free-tier rate limit; the
+  agent backs off and retries once, but heavy back-to-back testing is still the fastest way to see it.
 
 ## Rubric self-check
 
@@ -112,32 +117,40 @@ All tool tests passed.
 
 ## Measured accuracy
 
-Run against the real Groq API on 2026-08-30, using `tests/evaluation.py`. Reported as three separate
-runs, not the best-looking one, because the model isn't perfectly deterministic even at
-`temperature=0.2`.
-
-**Cumulative drift-sequence accuracy: 100% (4/4)**, unchanged across every run - all four hand-labelled
-sequences (`data/drift_sequences.json`) landed on the expected drift level (LOW, MODERATE, MODERATE,
-CRITICAL). This is the core claim of the project, and it held up exactly as designed every time.
+Run against the real Groq API on 2026-08-30, using `tests/evaluation.py`. Every run is reported below,
+including the two that went badly, because a single cherry-picked number would misrepresent what was
+actually measured.
 
 **Single-request classification accuracy (`data/evaluation_cases.json`, 32 cases):**
 
-| Run | Accuracy | Notes |
+| Run | Accuracy | What changed / what happened |
 |---|---:|---|
-| 1 (original prompt) | 90.6% (29/32) | 5 categories all reasonable; NEEDS_CLARIFICATION recall 0.71 |
-| 2 (original prompt) | 84.4% (27/32) | 2 vague requests ("better for mobile", "a booking feature") answered confidently instead of flagged NEEDS_CLARIFICATION |
-| 3 (after prompt change below) | 84.4% (27/32) | NEEDS_CLARIFICATION recall improved to 0.86, but PARTIALLY_IN_SCOPE recall dropped to 0.33 |
+| 1 (baseline prompt) | 90.6% (29/32) | NEEDS_CLARIFICATION recall was the weak point (0.71) |
+| 2 (baseline prompt) | 84.4% (27/32) | Confirmed the same weak point: 2 vague requests ("better for mobile", "a booking feature") answered confidently instead of flagged |
+| 3 (added a NEEDS_CLARIFICATION push to the prompt) | 84.4% (27/32) | NEEDS_CLARIFICATION recall improved (0.71→0.86), but a new pattern appeared: PARTIALLY_IN_SCOPE recall dropped to 0.33 |
+| 4 (added worked examples for the IN_SCOPE/PARTIALLY_IN_SCOPE boundary) | 6.2% (2/32) - **discarded, not a real accuracy result** | Every request after the first two came back `NO_CALL`. Not a classification failure - see "the bug this uncovered" below. |
+| 5 (same prompt as run 4, after fixing the bug) | **96.9% (31/32)** | Clean run. Only miss: the FAQ-section case, which is arguably a borderline label to begin with (see below). |
 
-Run 2 showed a real pattern worth fixing: the model answered confidently on vague requests instead of
-admitting it needed more detail. The system prompt in `src/agent.py` was changed to explicitly instruct
-the model to use `NEEDS_CLARIFICATION` for any request that doesn't name a specific, concrete feature,
-even if it could make an educated guess.
+**The bug this uncovered.** Run 4's near-total collapse looked at first like the new prompt had
+somehow broken everything. Investigating one request directly (instead of trusting the aggregate
+number) showed the real cause: after 4 evaluation runs in the same session (~130 API calls), the
+free-tier rate limit on `openai/gpt-oss-120b` was being hit, `agent.py`'s retry logic fell back to a
+second model, `llama-3.1-8b-instant` - and that model no longer exists on Groq (confirmed by listing
+`client.models.list()`), so the fallback itself failed with a 404, and every one of those requests
+silently became a "the AI is unavailable" message with no tool call, hence `NO_CALL` on every
+prediction. **Fixed** by: (1) swapping the fallback to `openai/gpt-oss-20b`, a model actually offered
+today, and (2) making the retry back off 8 seconds on a detected rate limit instead of the original
+flat 1.5 seconds, which was too short to matter. Run 5, right after the fix, came back clean. This is
+arguably the more instructive failure of the two documented in this project: it shows that a bad
+accuracy number needs the same "why" investigation as a bad classification does, before you trust it.
 
-**Honest result of that change:** it measurably helped the thing it targeted (NEEDS_CLARIFICATION
-recall went up, and the "better for mobile" case that failed in run 2 was correctly flagged in run 3).
-But a different pattern appeared in the same run: four `PARTIALLY_IN_SCOPE` cases (all "add a small
-widget to an existing page" style requests, like a Google Maps embed or an FAQ section) got called
-`IN_SCOPE` instead. **With only one run before and one after, this isn't enough data to say for
-certain the prompt change caused the regression rather than normal run-to-run variance** - that would
-need several more runs averaged together, which is listed under Future Improvements rather than
-claimed here as a solved problem.
+**Cumulative drift-sequence accuracy: 3/4 (75%) on the same clean run**, down from 4/4 measured
+earlier. The miss: sequence `D_mixed_with_ambiguity` was expected to land on MODERATE and instead
+scored HIGH. Looking at the actual logged numbers, the cause wasn't a classification mistake - the one
+genuinely out-of-scope request in that sequence ("book a table online with real-time availability")
+got a noticeably higher hours estimate on this run than on earlier runs, which alone was enough to push
+`hours_component` (40% of the drift score) over the MODERATE/HIGH line. This is a legitimate limitation
+worth stating plainly: **the model's own effort estimates vary between runs, and because hours make up
+40% of the drift score, that variance alone can occasionally shift a borderline case into the next
+drift level.** Averaging several runs (see Future Improvements) would smooth this out; a single run
+should be read as directionally correct, not exact to the point.
