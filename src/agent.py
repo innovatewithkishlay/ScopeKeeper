@@ -100,7 +100,13 @@ class ScopeKeeperAgent:
         )
         self.model = model or os.getenv("MODEL", "openai/gpt-oss-120b")
         self.fallback_model = fallback_model or os.getenv("FALLBACK_MODEL", "openai/gpt-oss-20b")
-        self.client = OpenAI(base_url=endpoint, api_key=token)
+        # max_retries=0: the OpenAI SDK normally retries failed requests itself,
+        # sleeping silently inside the library before our code ever sees an
+        # error. That hides what's actually happening and delays our own
+        # visible retry/backoff/fallback logic below. Disabling the SDK's
+        # built-in retries means _complete_with_retry is the only thing that
+        # ever decides how long to wait and what to do next.
+        self.client = OpenAI(base_url=endpoint, api_key=token, max_retries=0)
 
         self.state = ProjectState()
         self.tools = ScopeTools(self.state)
