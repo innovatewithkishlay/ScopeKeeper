@@ -123,6 +123,18 @@ st.markdown(
         font-weight: 700;
         margin-bottom: 4px;
     }
+
+    /* Keep the right-hand status panel in view as the left conversation
+       column grows and the page scrolls, instead of it sliding out of
+       sight above the fold. align-self:flex-start is required alongside
+       position:sticky here - without it Streamlit stretches the column to
+       match the taller sibling, which leaves no scroll room for "sticky"
+       to actually stick within. */
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(2) {
+        position: sticky;
+        top: 1rem;
+        align-self: flex-start;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -147,8 +159,35 @@ if "log" not in st.session_state:
 # Setup form (only shown before a project exists)
 # ---------------------------------------------------------------------------
 if st.session_state.agent is None:
+    saved_projects = ScopeKeeperAgent.list_saved_projects()
+    if saved_projects:
+        st.markdown('<div class="sk-card purple">', unsafe_allow_html=True)
+        st.markdown('<div class="sk-label">Resume a previous project</div>', unsafe_allow_html=True)
+        st.caption("These were saved to a real database file (scopekeeper.db) - they survive closing this app completely.")
+        for row in saved_projects:
+            c1, c2 = st.columns([4, 1])
+            with c1:
+                st.markdown(
+                    f"**{row['name']}** &middot; {row['currency']} {row['budget']:,.0f} "
+                    f"&middot; {row['request_count']} request(s) logged &middot; "
+                    f"<span style='color:var(--muted)'>saved {row['created_at']}</span>",
+                    unsafe_allow_html=True,
+                )
+            with c2:
+                if st.button("Resume", key=f"resume_{row['id']}"):
+                    try:
+                        agent = ScopeKeeperAgent()
+                    except RuntimeError as exc:
+                        st.error(str(exc))
+                        st.stop()
+                    agent.load_project(row["id"])
+                    st.session_state.agent = agent
+                    st.session_state.log = []
+                    st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown('<div class="sk-card blue">', unsafe_allow_html=True)
-    st.markdown('<div class="sk-label">Step 1 &middot; Set up the deal</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sk-label">Or start a new project</div>', unsafe_allow_html=True)
 
     with st.form("setup_form"):
         col1, col2 = st.columns(2)
@@ -213,15 +252,24 @@ with left:
 
     with st.form("request_form", clear_on_submit=True):
         user_input = st.text_input("New client request, or ask a question like 'are we drifting?'", "")
-        send = st.form_submit_button("Send")
+        col_send, col_proposal = st.columns([1, 1])
+        send = col_send.form_submit_button("Send")
+        draft = col_proposal.form_submit_button("Draft a change-order proposal instead")
 
-    if send and user_input.strip():
-        st.session_state.log.append(("client", user_input.strip()))
+    if (send or draft) and (user_input.strip() or draft):
+        if draft:
+            message = (
+                "Draft a short, professional change-order proposal for the client, based on the "
+                "actual requests and numbers logged so far - not a hypothetical."
+            )
+            st.session_state.log.append(("client", "(requested a change-order proposal)"))
+        else:
+            message = user_input.strip()
+            if message.lower().startswith(("new client", "add ", "can ")):
+                message = f"New client request: {message}"
+            st.session_state.log.append(("client", user_input.strip()))
+
         with st.spinner("Thinking..."):
-            if user_input.strip().lower().startswith(("new client", "add ", "can ")):
-                message = f"New client request: {user_input.strip()}"
-            else:
-                message = user_input.strip()
             answer = agent.run(message)
         st.session_state.log.append(("agent", answer))
         st.rerun()

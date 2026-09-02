@@ -29,6 +29,11 @@ class ProjectState:
     deliverables: List[str] = field(default_factory=list)
     exclusions: List[str] = field(default_factory=list)
 
+    # Set once the project has been saved to (or loaded from) the database -
+    # this is what lets a later session write new requests to the same
+    # project row instead of creating a duplicate.
+    project_id: Optional[int] = None
+
     requests: List[RequestRecord] = field(default_factory=list)
     conversation: List[dict] = field(default_factory=list)
 

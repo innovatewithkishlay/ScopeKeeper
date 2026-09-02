@@ -29,7 +29,9 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from openai import OpenAI
 
+import db
 from memory import ProjectState
+from models import RequestRecord
 from tools import ScopeTools
 
 load_dotenv()
@@ -83,6 +85,22 @@ many distinct new capability groups have appeared across all requests - that is 
 real signal that the project has quietly become a different project, even if no single \
 request looked alarming on its own.
 
+If you're shown a "Similar past requests" reference list, it comes from a database of requests \
+logged in this project or earlier ones - use it only to stay consistent with how similar things \
+were judged before, never as a rule that overrides the actual deliverables/exclusions of THIS \
+project. Say so explicitly if you're leaning on a past example ("similar to a request logged \
+earlier, this looks like...").
+
+If the user asks you to draft a change-order proposal, a message to the client, or a summary for \
+their records, call get_scope_status() first if you haven't already this turn, and write it using \
+only the real numbers and requests it returns - never invent a price, a deadline, or a request \
+that wasn't actually logged.
+
+If the user asks a general question about the project (e.g. "what's included again?", "how many \
+requests so far?") that doesn't need a new classification, answer directly from the project state \
+or by calling get_scope_status() - you don't need to call log_request for a question that isn't a \
+new client ask.
+
 Never claim you called a tool when you did not. If information is missing, say so plainly \
 instead of filling it in.
 """
@@ -132,6 +150,41 @@ class ScopeKeeperAgent:
         self.state.deadline = deadline
         self.state.deliverables = list(deliverables)
         self.state.exclusions = list(exclusions or [])
+
+        self.state.project_id = db.save_project(
+            name=name, objective=objective, budget=budget, currency=currency,
+            estimated_hours=estimated_hours, deadline=deadline,
+            deliverables=self.state.deliverables, exclusions=self.state.exclusions,
+        )
+
+    def load_project(self, project_id: int) -> None:
+        """Rebuild this agent's memory from a project saved in an earlier
+        session - this is the actual cross-session persistence: close the
+        notebook, reopen it days later, and every request logged before is
+        still here, with the drift numbers recalculated from real stored
+        data, not remembered from the AI's own memory (it has none)."""
+        data = db.load_project(project_id)
+        if data is None:
+            raise ValueError(f"No project found with id {project_id}")
+
+        self.state.project_id = data["id"]
+        self.state.name = data["name"]
+        self.state.objective = data["objective"]
+        self.state.budget = data["budget"]
+        self.state.currency = data["currency"]
+        self.state.estimated_hours = data["estimated_hours"]
+        self.state.deadline = data["deadline"]
+        self.state.deliverables = data["deliverables"]
+        self.state.exclusions = data["exclusions"]
+        self.state.requests = [
+            RequestRecord(index=i + 1, **r) for i, r in enumerate(data["requests"])
+        ]
+
+    @staticmethod
+    def list_saved_projects():
+        """What's available to resume - each row already includes how many
+        requests were logged against it, straight from the database."""
+        return db.list_projects()
 
     # ---- tool schemas ----
     def _tool_schemas(self) -> List[Dict[str, Any]]:
@@ -214,6 +267,19 @@ class ScopeKeeperAgent:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "system", "content": "Current project state:\n" + self.state.compact_context()},
         ]
+
+        # Retrieval-based memory: look up past requests (this project or
+        # earlier ones) that share real words with the new message, and give
+        # the model a short reference list. This is a database lookup, not
+        # the model "learning" - the weights never change, only what's put
+        # in front of it this one time.
+        similar = db.find_similar_past_requests(user_message, limit=3)
+        if similar:
+            lines = ["Similar past requests (for reference/consistency only):"]
+            for s in similar:
+                lines.append(f'- "{s["description"]}" (project: {s["project_name"]}) -> {s["classification"]}: {s["reasoning"]}')
+            messages.append({"role": "system", "content": "\n".join(lines)})
+
         messages.extend(self.state.recent_messages())
 
         last_call_signature = None

@@ -24,6 +24,23 @@ request logged since, as structured data (`src/memory.py`), not as a growing pil
 Ask "are we drifting?" three requests later, and the agent answers using everything logged so far, not
 just the last message - that's what makes it more than a single-turn Q&A.
 
+## Persistent memory - a real database
+
+The in-session memory above is only half the picture. Every project and every logged request is also
+written immediately to a real SQLite database file (`scopekeeper.db`, via `src/db.py`) - not just held
+in memory until the notebook closes. `ScopeKeeperAgent.load_project(project_id)` rebuilds a project's
+full state, including every past request, in a brand new agent instance with no other memory of
+anything - proof this survives closing the notebook completely, not just closing one cell's output.
+`ScopeKeeperAgent.list_saved_projects()` lists what's available to resume, and the Streamlit UI
+(`app.py`) has a "Resume a previous project" screen built on exactly this.
+
+On top of that, before classifying any new request, the agent looks up past requests - from this
+project or any earlier one - that share real words with it (`db.find_similar_past_requests`, plain
+word-overlap scoring after stripping punctuation and simple plurals) and includes the closest few as
+reference context. **This is retrieval-based memory, not model fine-tuning** - nothing about the AI's
+weights ever changes. It's the same idea as a freelancer flipping back through their own old notes
+before answering a new client, done automatically.
+
 ## One honest failure, and how it was fixed
 
 The first version of the drift calculation added every request's estimated hours into the cumulative
@@ -41,6 +58,8 @@ silently regress.
    lane instead - either works, `src/agent.py` checks both).
 3. Open `ScopeKeeper.ipynb` and run all cells. If no `.env` is found, the notebook asks for the key
    securely at runtime instead - the key is never hardcoded or printed anywhere.
+4. Optional: `streamlit run app.py` for a small UI on top of the same agent, including a "resume a
+   previous project" screen backed by the same database.
 
 ## Running the tests
 
@@ -48,13 +67,15 @@ silently regress.
 python tests/test_drift.py
 python tests/test_validation.py
 python tests/test_tools.py
+python tests/test_db.py
 python tests/evaluation.py     # needs a real API key - measures actual classification accuracy
 ```
 
-The first three need no API key - they test the deterministic Python (drift math, argument validation,
-the tools themselves) directly. `evaluation.py` is the one that needs a real model call, because it's
-testing whether the model's judgement is any good, not just whether the code runs; it honestly prints
-"not measured" instead of a number if no key is set.
+The first four need no API key - they test the deterministic Python (drift math, argument validation,
+the tools themselves, and the SQLite persistence/retrieval layer) directly, using a temporary throwaway
+database file so they never touch a real project's data. `evaluation.py` is the one that needs a real
+model call, because it's testing whether the model's judgement is any good, not just whether the code
+runs; it honestly prints "not measured" instead of a number if no key is set.
 
 ## Why this is an agent, not a chatbot
 

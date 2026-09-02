@@ -10,6 +10,7 @@ agent.py is where the model's classification actually gets produced.
 
 from typing import Any, Dict
 
+import db
 import drift
 from memory import ProjectState
 from models import RequestRecord
@@ -47,6 +48,13 @@ class ScopeTools:
             confidence=cleaned["confidence"],
         )
         self.state.add_request(record)
+
+        # Write-through to the database immediately, not just at the end of
+        # the session - if the project was never saved (e.g. someone calling
+        # the tool directly in a test, with no project_id set), this is
+        # skipped rather than crashing.
+        if self.state.project_id is not None:
+            db.save_request(self.state.project_id, record)
 
         stats = drift.compute_stats(self.state.requests, self.state.estimated_hours)
         return {
