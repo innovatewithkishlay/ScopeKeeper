@@ -124,7 +124,14 @@ class ScopeKeeperAgent:
         # visible retry/backoff/fallback logic below. Disabling the SDK's
         # built-in retries means _complete_with_retry is the only thing that
         # ever decides how long to wait and what to do next.
-        self.client = OpenAI(base_url=endpoint, api_key=token, max_retries=0)
+        #
+        # timeout=30: without this, the SDK's default timeout is several
+        # minutes - if Groq ever accepts a connection but stalls instead of
+        # answering (different from a fast 429), a single call could hang
+        # silently for a long time before our retry/fallback logic ever gets
+        # a chance to run. 30s is generous for a single classification call
+        # but still fails fast enough that a real problem shows up quickly.
+        self.client = OpenAI(base_url=endpoint, api_key=token, max_retries=0, timeout=30.0)
 
         self.state = ProjectState()
         self.tools = ScopeTools(self.state)
